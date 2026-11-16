@@ -363,29 +363,37 @@ BEEP 一次只能发一个音，所以：
 |---|---|
 | `--mode edge` | 边缘检测（默认，适合照片） |
 | `--mode mono` | 深色像素直接当线（适合线稿、扫描件、剪影） |
+| `--invert` | mono 模式下反色（黑底白线时用） |
 | `--paper-mm 57` | 纸宽毫米，默认 57（CE-150 热敏纸） |
-| `--max-side N` | 预处理细节，默认 420。越大线越多 |
+| `--max-side N` | 预处理细节，默认 700。越大线越多 |
 | `--simplify N` | 抽稀强度，默认 1.0。越大线越少 |
 | `--threshold N` | 灵敏度，默认 128。edge 模式越小线越多 |
+| `--width N` / `--height N` | 绘图宽/高上限（步），默认取机器上限（216 / 512） |
 | `--preview out.png` | 导出预览图 + SVG |
 
 生成的程序长这样：
 
 ```basic
 10 REM PC-1500 CE-150 DRAWING
+20 REM photo
 30 GRAPH
-40 LINE (0,0)-(570,0)
-60 LINE (0,0)-(0,428)
-90 LINE (496,142)-(357,143):LINE (357,143)-(357,312):...
-99 TEXT
+40 GLCURSOR (0,0)
+50 LINE (12,40)-(80,40)
+60 LINE (12,40)-(12,180)
+70 LINE (80,40)-(80,180):LINE (80,180)-(150,180)
+...
+TEXT
+END
 ```
 
 用的是 CE-150 的绘图指令：`GRAPH` 进入绘图模式，`GLCURSOR` 定位，
 `LINE (x1,y1)-(x2,y2)` 画线，最后 `TEXT` 回到文字模式。
+坐标范围：X 不超过 **216** 步（约 43.2 mm），Y 不超过 **512** 步（约 102.4 mm），
+每步 0.2 mm。
 
-**内存提醒**：PC-1500 只有 2K 用户内存，一个 LINE 大约占 20 字节。
-程序行数太多会放不下——超了就把 `--max-side` 调小或 `--simplify` 调大。
-工具会在行数超过 1200 时提示。
+**内存提醒**：工具按 **每行约 4 字节 + 每个 LINE 约 18 字节** 估算 BASIC 体积。
+超过 `--ram-kb`（默认 22000 KB）的 90% 时会警告。
+如果提示超限，把 `--max-side` 调小或 `--simplify` 调大，也可以调大 `--ram-kb`。
 
 流程同音乐：`./bas2wav DRAW.bas` 生成磁带音频，机器上 `CLOAD` 后 `RUN`，
 打印机就开始画。
@@ -442,6 +450,6 @@ LOOPS_PER_SECOND = 83
 
 ## 参考资料
 
-- 官方 Pocket Tools 手册：`share/Pocket_Tools_Manual_200.pdf`
-- 工具原始源码：`share/*.c`
+- [官方 Pocket Tools 手册](share/Pocket_Tools_Manual_200.pdf)
+- [工具原始源码](share/)
 - PC-1500 官方使用手册（BEEP 在 p.165-167，音域说明在 p.41）
