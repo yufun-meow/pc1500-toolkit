@@ -1,3 +1,5 @@
+**English** | [简体中文](README_CN.md)
+
 # PC-1500 Audio ↔ BASIC Environment + MIDI → BEEP Music Generator
 
 An on-device toolkit for the Sharp PC-1500 (TRS-80 PC-2): **convert between BASIC and cassette audio**,
