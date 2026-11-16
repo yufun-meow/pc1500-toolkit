@@ -1,3 +1,5 @@
+[English](README.md) | **简体中文**
+
 # PC-1500 音频 ↔ BASIC 环境 + MIDI → BEEP 音乐生成器
 
 给 Sharp PC-1500（TRS-80 PC-2）用的本机工具集：**BASIC 与磁带音频互转**，
