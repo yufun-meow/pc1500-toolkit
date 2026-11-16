@@ -392,29 +392,38 @@ Parameters:
 |---|---|
 | `--mode edge` | edge detection (default, good for photos) |
 | `--mode mono` | dark pixels become lines directly (good for line art, scans, silhouettes) |
+| `--invert` | in mono mode, invert (use for white lines on a black background) |
 | `--paper-mm 57` | paper width in mm, default 57 (CE-150 thermal paper) |
-| `--max-side N` | preprocessing detail, default 420. Larger = more lines |
+| `--max-side N` | preprocessing detail, default 700. Larger = more lines |
 | `--simplify N` | thinning strength, default 1.0. Larger = fewer lines |
 | `--threshold N` | sensitivity, default 128. In edge mode, smaller = more lines |
+| `--width N` / `--height N` | drawing width/height cap in steps, defaults to the machine limits (216 / 512) |
 | `--preview out.png` | export a preview image + SVG |
 
 The generated program looks like this:
 
 ```basic
 10 REM PC-1500 CE-150 DRAWING
+20 REM photo
 30 GRAPH
-40 LINE (0,0)-(570,0)
-60 LINE (0,0)-(0,428)
-90 LINE (496,142)-(357,143):LINE (357,143)-(357,312):...
-99 TEXT
+40 GLCURSOR (0,0)
+50 LINE (12,40)-(80,40)
+60 LINE (12,40)-(12,180)
+70 LINE (80,40)-(80,180):LINE (80,180)-(150,180)
+...
+TEXT
+END
 ```
 
 It uses the CE-150's drawing commands: `GRAPH` enters graphics mode, `GLCURSOR`
 positions, `LINE (x1,y1)-(x2,y2)` draws a line, and `TEXT` returns to text mode.
+Coordinate range: X up to **216** steps (about 43.2 mm), Y up to **512** steps
+(about 102.4 mm), at 0.2 mm per step.
 
-**Memory warning**: the PC-1500 has only 2K of user memory, and a `LINE` takes
-about 20 bytes. Too many program lines won't fit — if it overflows, lower
-`--max-side` or raise `--simplify`. The tool warns when the line count exceeds 1200.
+**Memory warning**: the tool estimates BASIC size at roughly **4 bytes per line
+plus 18 bytes per LINE statement**. It warns when the estimate exceeds 90% of
+`--ram-kb` (default 22000 KB). If it does, lower `--max-side`, raise
+`--simplify`, or raise `--ram-kb`.
 
 Same flow as music: `./bas2wav DRAW.bas` generates cassette audio, `CLOAD` then
 `RUN` on the machine, and the printer starts drawing.
@@ -473,39 +482,9 @@ After editing, just re-run the script; no code changes needed.
 
 ---
 
-## 5. Verified / Unverified
-
-**Verified** (offline):
-- BASIC → intermediate code → WAV → BASIC round-trip, content character-for-character identical
-- `-t img` round-trip, intermediate code byte-for-byte identical
-- Filename written correctly (the one the real machine's `CLOAD "NAME"` uses)
-- MIDI parsing: `--list-tracks` correctly lists tracks and note counts;
-  drum channel 9 is skipped; same-pitch overlaps are merged; notes shorter than
-  30 ms are filtered out
-- Generated BASIC is accepted by the official compiler
-
-**Unverified / known issues**:
-- **Real-machine audio loading has succeeded**: the machine reporting `BREAK IN 50`
-  means the WAV was correctly loaded and executed; the audio-encoding path works.
-- **value1 must not be 0** (0 times = silence; measured no sound / BREAK). The
-  manual examples are all 1/2/5/10; now `BEEP 1,N,S` is generated uniformly.
-- value3's exact unit is still undetermined. The script uses a linear fit (44~1600);
-  the manual example `D=50` produces sound, so durations should be in the
-  tens-to-hundreds range.
-- The rest empty-loop coefficient `LOOPS_PER_SECOND = 83` is a measured value
-  (5000 loops ≈ 14.2 seconds); it may need re-measuring on a different machine /
-  BASIC interpreter.
-- The pitch formula is back-derived from official examples, **not calibrated
-  note-by-note on the real machine**; out-of-range notes are clamped.
-- A third-party sample I have, `lecon-de-musique.wav`, doesn't decode to correct
-  content (file header and checksum are correct, but the body is misaligned).
-  Cause undetermined; it may be a synthetic file rather than a real-machine CSAVE.
-  **Trust recordings from a real machine.**
-
----
 
 ## References
 
-- Official Pocket Tools manual: `share/Pocket_Tools_Manual_200.pdf`
-- Original tool source: `share/*.c`
+- [Official Pocket Tools manual](share/Pocket_Tools_Manual_200.pdf)
+- [Original tool source](share/)
 - PC-1500 official user manual (BEEP on p.165-167, range notes on p.41)
