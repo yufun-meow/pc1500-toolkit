@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# bas2wav — PC-1500 BASIC 源码(.bas) -> 可播放的 WAV 音频(.wav)
+#
+# 本脚本只是 bas2img + bin2wav 的薄包装（官方 Pocket Tools 2.00 原样编译），
+# 不改变任何编码规则，只把固定参数收好。需要完全控制时请直接调用 bin/ 下的程序。
+#
+# 用法:
+#   ./bas2wav                程序.bas                     -> 程序.wav
+#   ./bas2wav                程序.bas out.wav
+#   ./bas2wav -n MUSIC -s 2  程序.bas                    -> 文件名 MUSIC，同步 2 秒
+#
+# 可选项:
+#   -n NAME   文件保存名(PC-1500 最多 16 字符)，默认取输出文件名
+#   -s SEC    文件头前的同步时长，秒（0.5~9，默认 2.0，对应真机 CSAVE 的 ">文件名"）
+#   -p PC     PC 型号，默认 1500
+#   -r RATE   采样率: 48k(最稳) | 16k(默认) | 44k | 10k
+#             手册要求 PC-1500 至少 11025 Hz；16k/44k 高于要求，声卡不用重采样
+#             10k 是官方默认，文件最小，但低于手册要求，部分声卡会出问题
+#   -k        保留中间 .img 文件
+#   -h        帮助
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN="$HERE/bin"
+PC=1500
+SYNC=2.0
+NAME=""
+KEEP=0
+RATE=16k
+
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+while getopts ":n:s:p:r:kh" opt; do
+  case "$opt" in
+    n) NAME="$OPTARG" ;;
+    s) SYNC="$OPTARG" ;;
+    p) PC="$OPTARG" ;;
+    r) RATE="$OPTARG" ;;
+    k) KEEP=1 ;;
+    h) usage 0 ;;
+    :) echo "选项 -$OPTARG 需要一个参数" >&2; exit 2 ;;
+    \?) echo "未知选项 -$OPTARG" >&2; usage 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+[ $# -ge 1 ] || usage 2
+SRC="$1"
+[ -f "$SRC" ] || { echo "找不到源文件: $SRC" >&2; exit 1; }
+case "$SRC" in *.bas|*.BAS) ;; *) echo "提示: 源文件通常应为 .bas" >&2 ;; esac
+
+OUT="${2:-}"
+if [ -z "$OUT" ]; then OUT="${SRC%.*}.wav"; fi
+IMG="${OUT%.*}.img"
+[ -n "$NAME" ] || NAME="$(basename "${OUT%.*}")"
+
+# 1) 源码 -> BASIC 中间码(image)
+#    -p 型号必须给定，PC-1500 的 token 表和行格式与其它型号不同
+"$BIN/bas2img" -p "$PC" "$SRC" "$IMG"
+
+# 2) 中间码 -> 磁带音频
+#    -t img   源是 BASIC 中间码
+#    -s 秒    同步时长（真机 CSAVE 在文件名前放约 2 秒单音）
+#    输出为 8-bit 单声道 PCM WAV
+#    -l 选波形/采样率: 3=16kHz(默认) 2=44.1kHz 1=约10kHz(官方默认)
+case "$RATE" in
+  16k|16000) LOPT=3 ;;
+  44k|44.1k|44100) LOPT=2 ;;
+  10k|10000|-) LOPT="" ;;
+  48k|48000) LOPT="" ;;   # 48k 走零阶保持，见下
+  *) echo "未知采样率: $RATE（可选 48k / 16k / 44k / 10k）" >&2; exit 2 ;;
+esac
+
+if [ "$RATE" = "48k" ] || [ "$RATE" = "48000" ]; then
+  # 48kHz：先生成 10kHz 原始位流，再用零阶保持精确放大到 48000 Hz / 16-bit。
+  # 这样和多数声卡的原生采样率完全一致，PipeWire 不会做任何重采样，
+  # 方波边沿保持陡峭 —— CLOAD 读不出时的首选格式。
+  RAW="${OUT%.*}.raw10k.wav"
+  "$BIN/bin2wav" -p "$PC" -t img -s "$SYNC" "-n$NAME" "$IMG" "$RAW"
+  python3 - "$RAW" "$OUT" 48000 <<'PY'
+import sys, wave
+src, dst, target = sys.argv[1], sys.argv[2], int(sys.argv[3])
+w = wave.open(src, 'rb')
+n, fr = w.getnframes(), w.getframerate()
+raw = w.readframes(n); w.close()
+out = bytearray(); acc = 0
+for i in range(n):
+    v = (raw[i] - 128) << 8          # 8-bit -> 16-bit
+    acc += target
+    while acc >= fr:                 # 零阶保持：重复采样点，不插值、不过滤
+        acc -= fr
+        out += int(v).to_bytes(2, 'little', signed=True)
+o = wave.open(dst, 'wb')
+o.setnchannels(1); o.setsampwidth(2); o.setframerate(target)
+o.writeframes(bytes(out)); o.close()
+PY
+  rm -f "$RAW"
+else
+  extra=()
+  [ -n "$LOPT" ] && extra=(-l "$LOPT")
+  "$BIN/bin2wav" -p "$PC" -t img -s "$SYNC" "-n$NAME" ${extra[@]+"${extra[@]}"} "$IMG" "$OUT"
+fi
+
+[ "$KEEP" -eq 1 ] || rm -f "$IMG"
+
+echo
+echo "完成: $OUT  (保存名 \"$NAME\", 型号 PC-$PC, 同步 ${SYNC}s, 采样率 $RATE)"

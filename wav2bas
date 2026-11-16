@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# wav2bas — PC-1500 磁带音频(.wav) -> BASIC 源码(.bas)
+#
+# 本脚本只是 wav2bin 的薄包装（官方 Pocket Tools 2.00 原样编译），
+# 不改变任何解码规则。需要完全控制时请直接调用 bin/wav2bin。
+#
+# 录音要求（官方手册）: PC-1500 至少 11025 Hz 采样、单声道、16-bit 更好、不要限幅。
+#
+# 用法:
+#   ./wav2bas                录音.wav                    -> 录音.bas
+#   ./wav2bas                录音.wav out.bas
+#   ./wav2bas -t img         录音.wav                    -> 录音.img（BASIC 中间码原样）
+#   ./wav2bas -i             录音.wav test.img           -> 同时得到文本和中间码
+#
+# 可选项:
+#   -t TYPE   bas(默认，文本) | img(中间码) | rsv | sha
+#   -u MODE   非标准符号: yes(UTF-8, 默认) | no(可逆 ASCII) | 2dos | 2asc
+#   -w N      行号最小宽度，默认 5
+#   -d DEV    录音来源滤波: 空(默认) | CAS(磁带机直录) | AIR(蜂鸣器外录) | EMU(模拟器回放)
+#   -c R      速度比（改机加速时钟时用；模拟器回放也可用）
+#   -k        保留中间 .img 文件（-t bas 时），便于核查
+#   -h        帮助
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN="$HERE/bin"
+PC=1500
+TYPE=bas
+UTF8=yes
+WIDTH=5
+DEV=""
+CSPEED=""
+KEEP=0
+IMG_OUT=""
+
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+while getopts ":t:u:w:d:c:i:kh" opt; do
+  case "$opt" in
+    t) TYPE="$OPTARG" ;;
+    u) UTF8="$OPTARG" ;;
+    w) WIDTH="$OPTARG" ;;
+    d) DEV="$OPTARG" ;;
+    c) CSPEED="$OPTARG" ;;
+    k) KEEP=1 ;;
+    i) KEEP=1; IMG_OUT="$OPTARG" ;;
+    h) usage 0 ;;
+    :) echo "选项 -$OPTARG 需要一个参数" >&2; exit 2 ;;
+    \?) echo "未知选项 -$OPTARG" >&2; usage 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+[ $# -ge 1 ] || usage 2
+SRC="$1"
+[ -f "$SRC" ] || { echo "找不到文件: $SRC" >&2; exit 1; }
+
+case "$TYPE" in
+  bas) OUT="${2:-${SRC%.*}.bas}" ;;
+  img) OUT="${2:-${SRC%.*}.img}" ;;
+  *)   OUT="${2:-${SRC%.*}.$TYPE}" ;;
+esac
+
+ARGS=(-t "$TYPE" -p "$PC")
+[ "$TYPE" = bas ] && ARGS+=(-u "$UTF8" -w "$WIDTH")
+[ -n "$DEV" ] && ARGS+=(--device="$DEV")
+[ -n "$CSPEED" ] && ARGS+=(-c "$CSPEED")
+
+echo "+ ${BIN}/wav2bin ${ARGS[*]} \"$SRC\" \"$OUT\""
+set +e
+"$BIN/wav2bin" "${ARGS[@]}" "$SRC" "$OUT"
+RC=$?
+set -e
+
+# -i: 文本之外再导出一份中间码，便于和真机对比
+if [ -n "$IMG_OUT" ] && [ "$TYPE" = bas ]; then
+  echo
+  echo "+ 另外导出中间码: $IMG_OUT"
+  "$BIN/wav2bin" -t img -p "$PC" ${DEV:+--device="$DEV"} "$SRC" "$IMG_OUT" || true
+fi
+
+if [ "$KEEP" -eq 0 ] && [ "$TYPE" = bas ] && [ -f "${OUT%.*}.img" ] && [ -z "$IMG_OUT" ]; then
+  rm -f "${OUT%.*}.img"
+fi
+
+exit $RC

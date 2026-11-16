@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# selftest — 环境自检：确认工具可执行，并做一次纯离线的 BAS->WAV->BAS 回环。
+# 不需要连接设备；全部在临时目录里完成，不污染当前目录。
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+FAIL=0
+
+ok()   { printf '  [OK]   %s\n' "$*"; }
+bad()  { printf '  [FAIL] %s\n' "$*"; FAIL=1; }
+skip() { printf '  [SKIP] %s\n' "$*"; }
+
+echo "1) 工具是否可执行"
+for t in bas2img bin2wav wav2bin; do
+  if [ -x "$HERE/bin/$t" ]; then ok "bin/$t"; else bad "bin/$t 缺失或不可执行"; fi
+done
+[ "$FAIL" -eq 0 ] || { echo; echo "工具缺失，先看 README 的『编译』一节"; exit 1; }
+
+echo
+echo "2) 系统工具（可选，用于录音格式核对）"
+for t in ffmpeg sox; do
+  if command -v "$t" >/dev/null 2>&1; then ok "$t $(command -v $t)"; else skip "$t 未安装（不影响互转）"; fi
+done
+
+echo
+echo "3) 离线回环: BASIC -> WAV -> BASIC"
+cat > "$TMP/rt.bas" <<'EOF'
+10 PRINT "PC-1500"
+20 BEEP 1,60,20
+30 END
+EOF
+
+if "$HERE/bas2wav" -n RTCHECK -s 1 "$TMP/rt.bas" "$TMP/rt.wav" >"$TMP/b2w.log" 2>&1; then
+  ok "bas2wav 生成 WAV"
+else
+  bad "bas2wav 失败，见下："; sed 's/^/         /' "$TMP/b2w.log"; exit 1
+fi
+
+if "$HERE/wav2bas" "$TMP/rt.wav" "$TMP/rt2.bas" >"$TMP/w2b.log" 2>&1; then
+  ok "wav2bas 解出 BASIC"
+else
+  bad "wav2bas 失败，见下："; sed 's/^/         /' "$TMP/w2b.log"; exit 1
+fi
+
+# 比较时忽略行号宽度与行尾 CR
+norm() { tr -d '\r' < "$1" | sed 's/^ *//; s/ *$//' | grep -v '^$'; }
+if diff -q <(norm "$TMP/rt.bas") <(norm "$TMP/rt2.bas") >/dev/null; then
+  ok "回环内容一致："
+  sed 's/^/         /' <(norm "$TMP/rt2.bas")
+else
+  bad "回环内容不一致："
+  diff <(norm "$TMP/rt.bas") <(norm "$TMP/rt2.bas") | sed 's/^/         /'
+fi
+
+echo
+echo "4) 音频 -> BEEP 音乐（自造音阶，不需要设备）"
+if command -v ffmpeg >/dev/null 2>&1; then
+  if ffmpeg -v error -y \
+       -f lavfi -i "sine=frequency=262:duration=0.4" \
+       -f lavfi -i "sine=frequency=330:duration=0.4" \
+       -f lavfi -i "sine=frequency=392:duration=0.4" \
+       -filter_complex "[0][1][2]concat=n=3:v=0:a=1" \
+       -ar 11025 -ac 1 "$TMP/tone.wav" 2>"$TMP/ff.log"; then
+    ok "生成测试音 C4/E4/G4"
+
+    if "$HERE/beep2bas.py" --list-notes "$TMP/tone.wav" >"$TMP/notes.log" 2>&1; then
+      got=$(grep -oE "(C4|E4|G4)" "$TMP/notes.log" | tr '\n' ' ')
+      if [ "$(echo $got)" = "C4 E4 G4" ]; then
+        ok "识别音高正确: $got"
+      else
+        bad "识别音高不对，期望 C4 E4 G4，实际: $got"
+        sed 's/^/         /' "$TMP/notes.log"
+      fi
+    else
+      bad "beep2bas --list-notes 失败"
+    fi
+
+    if "$HERE/beep2bas.py" "$TMP/tone.wav" "$TMP/tone.bas" >"$TMP/music.log" 2>&1; then
+      ok "生成 BEEP 音乐 BASIC"
+      if grep -q "^10 REM PC-1500 BEEP MUSIC" "$TMP/tone.bas" &&
+         grep -q "BEEP 1,F,D" "$TMP/tone.bas" &&
+         grep -q "^[0-9]* DATA " "$TMP/tone.bas"; then
+        ok "BASIC 结构正确（REM / BEEP 循环 / DATA）"
+      else
+        bad "生成 BASIC 结构异常"; sed 's/^/         /' "$TMP/tone.bas"
+      fi
+      if "$HERE/bas2wav" -n SELFTEST -s 1 "$TMP/tone.bas" "$TMP/tone2.wav" >"$TMP/m2w.log" 2>&1; then
+        ok "音乐 BASIC 能被编译成 WAV"
+      else
+        bad "音乐 BASIC 编译失败"; sed 's/^/         /' "$TMP/m2w.log"
+      fi
+    else
+      bad "beep2bas 生成失败"; sed 's/^/         /' "$TMP/music.log"
+    fi
+  else
+    skip "ffmpeg 合成测试音失败"
+  fi
+else
+  skip "没有 ffmpeg，跳过音频->BEEP 测试"
+fi
+
+echo
+echo "5) 图片 -> 绘图 BASIC"
+if command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1; then
+  MK=$(command -v magick || command -v convert)
+  if "$MK" -size 200x150 xc:white -fill black \
+       -draw "circle 60,60 60,30" -draw "rectangle 120,40 180,120" \
+       "$TMP/shape.png" 2>/dev/null; then
+    if "$HERE/img2lines.py" "$TMP/shape.png" "$TMP/shape.bas" >"$TMP/img.log" 2>&1; then
+      n=$(grep -c "LINE (" "$TMP/shape.bas" || true)
+      if [ "$n" -ge 5 ] && grep -q "^30 GRAPH" "$TMP/shape.bas"; then
+        ok "生成绘图 BASIC（$n 个 LINE，含 GRAPH）"
+      else
+        bad "绘图 BASIC 内容异常"; sed 's/^/         /' "$TMP/shape.bas" | head
+      fi
+      if "$HERE/bas2wav" -n IMGTEST -s 1 -r 48k "$TMP/shape.bas" "$TMP/shape.wav" >"$TMP/i2w.log" 2>&1; then
+        ok "绘图 BASIC 能被编译成 WAV"
+      else
+        bad "绘图 BASIC 编译失败"; sed 's/^/         /' "$TMP/i2w.log"
+      fi
+    else
+      bad "img2lines 失败"; sed 's/^/         /' "$TMP/img.log"
+    fi
+  else
+    skip "无法用 ImageMagick 造测试图"
+  fi
+else
+  skip "没有 ImageMagick，跳过图片测试"
+fi
+
+echo
+if [ "$FAIL" -eq 0 ]; then echo "全部通过。"; else echo "存在失败项。"; fi
+exit "$FAIL"

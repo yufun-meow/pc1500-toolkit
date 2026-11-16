@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# check-wav — 检查一个 WAV 能不能用来给 PC-1500 装载
+# 用法: ./check-wav 文件.wav
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+F="${1:-}"
+[ -f "$F" ] || { echo "用法: $0 文件.wav"; exit 2; }
+
+echo "文件: $F"
+echo
+
+echo "── 1. 格式 ──"
+ffprobe -hide_banner "$F" 2>&1 | grep -E "Duration|Stream" | sed 's/^/  /'
+
+echo
+echo "── 2. 电平 ──"
+python3 - "$F" <<'PY'
+import sys, wave, struct
+f = sys.argv[1]
+w = wave.open(f, 'rb')
+n, sw, fr = w.getnframes(), w.getsampwidth(), w.getframerate()
+raw = w.readframes(n); w.close()
+if sw == 1:
+    s = [b - 128 for b in raw]; full = 128
+elif sw == 2:
+    s = list(struct.unpack('<%dh' % n, raw)); full = 32768
+else:
+    print("  不支持的位深", sw * 8); sys.exit(0)
+peak = max(abs(x) for x in s)
+dc = sum(s) / len(s)
+rms = (sum(x * x for x in s) / len(s)) ** 0.5
+print("  采样率 %d Hz  位深 %d-bit  时长 %.2f s" % (fr, sw * 8, n / fr))
+print("  峰值 %d / %d  (%.0f%% 满刻度)" % (peak, full, 100.0 * peak / full))
+print("  RMS  %.0f  (%.0f%%)" % (rms, 100.0 * rms / full))
+print("  直流偏移 %.1f" % dc)
+if fr < 11025:
+    print("  ⚠ 采样率低于 11025 Hz，PC-1500 可能读不出")
+elif fr < 20000:
+    print("  ✓ 采样率高于手册最低要求")
+else:
+    print("  ✓ 采样率很充裕")
+if peak < full * 0.5:
+    print("  ⚠ 峰值偏低，播放时音量要开大；或声卡输出不够")
+if peak >= full - 2:
+    print("  ⚠ 接近满刻度，若播放链路再放大就会削波")
+PY
+
+echo
+echo "── 3. 能不能解回 BASIC ──"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+if "$HERE/wav2bas" "$F" "$TMP/out.bas" > "$TMP/log" 2>&1; then
+    grep -E "Save name|Total bytes" "$TMP/log" | sed 's/^/  /'
+    echo "  ✓ 可以解析"
+else
+    echo "  ✗ 解析失败："
+    tail -5 "$TMP/log" | sed 's/^/    /'
+fi
