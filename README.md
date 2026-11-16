@@ -488,3 +488,7 @@ After editing, just re-run the script; no code changes needed.
 - [Official Pocket Tools manual](share/Pocket_Tools_Manual_200.pdf)
 - [Original tool source](share/)
 - PC-1500 official user manual (BEEP on p.165-167, range notes on p.41)
+  
+## LICENSE
+
+- This project is licensed under the terms of the MIT license.
