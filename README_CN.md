@@ -453,3 +453,7 @@ LOOPS_PER_SECOND = 83
 - [官方 Pocket Tools 手册](share/Pocket_Tools_Manual_200.pdf)
 - [工具原始源码](share/)
 - PC-1500 官方使用手册（BEEP 在 p.165-167，音域说明在 p.41）
+
+## 协议
+
+该工具采用MIT协议
